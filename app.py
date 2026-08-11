@@ -2,6 +2,8 @@ import streamlit as st
 import re
 import csv
 import base64
+import smtplib
+from email.mime.text import MIMEText
 from pathlib import Path
 from datetime import datetime
 
@@ -21,7 +23,20 @@ BG = "#F4F7F9"
 
 APP_DIR = Path(__file__).parent
 LOGO_PATH = APP_DIR / "prm_logo.png"
-LEADS_CSV = APP_DIR / "leads.csv"
+LEADS_CSV = APP_DIR / "leads.csv"   # her sonucun yerel yedeği (e-posta gitmese bile veri kaybolmaz)
+
+CSV_HEADER = ["tarih", "isim", "telefon", "email", "deneyim", "araclar", "sure", "risk", "butce"]
+
+FIELD_LABELS = {
+    "ad_soyad": "İsim Soyisim",
+    "telefon": "Telefon",
+    "email": "E-posta",
+    "deneyim": "Deneyim",
+    "araclar": "İlgilendiği Araçlar",
+    "sure": "Süre",
+    "risk": "Risk Profili",
+    "butce": "Bütçe Aralığı",
+}
 
 
 def logo_b64() -> str:
@@ -30,29 +45,70 @@ def logo_b64() -> str:
     return ""
 
 
-def save_lead(answers: dict) -> None:
-    """Yanıtları yerel bir CSV'ye kaydeder (bkz. alt not: kalıcılık)."""
+def _row_from_answers(answers: dict) -> list:
+    araclar = answers.get("araclar", "")
+    if isinstance(araclar, list):
+        araclar = "; ".join(araclar)
+    return [
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        answers.get("ad_soyad", ""),
+        answers.get("telefon", ""),
+        answers.get("email", ""),
+        answers.get("deneyim", ""),
+        araclar,
+        answers.get("sure", ""),
+        answers.get("risk", ""),
+        answers.get("butce", ""),
+    ]
+
+
+def _save_local_backup(row: list) -> None:
     is_new = not LEADS_CSV.exists()
     with open(LEADS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if is_new:
-            writer.writerow(
-                ["tarih", "isim", "telefon", "email", "deneyim", "araclar", "sure", "risk", "butce"]
-            )
-        araclar = answers.get("araclar", "")
-        if isinstance(araclar, list):
-            araclar = "; ".join(araclar)
-        writer.writerow([
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            answers.get("ad_soyad", ""),
-            answers.get("telefon", ""),
-            answers.get("email", ""),
-            answers.get("deneyim", ""),
-            araclar,
-            answers.get("sure", ""),
-            answers.get("risk", ""),
-            answers.get("butce", ""),
-        ])
+            writer.writerow(CSV_HEADER)
+        writer.writerow(row)
+
+
+def _send_lead_email(answers: dict) -> bool:
+    """Toplu mail gönderici uygulamasındaki aynı Gmail bilgilerini kullanır."""
+    sender = st.secrets.get("gmail_user")
+    password = st.secrets.get("gmail_app_password")
+    admin_email = st.secrets.get("admin_email", sender)
+    if not sender or not password or not admin_email:
+        return False
+
+    araclar = answers.get("araclar", "")
+    if isinstance(araclar, list):
+        araclar = "; ".join(araclar)
+
+    lines = [f"Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    for key, label in FIELD_LABELS.items():
+        value = araclar if key == "araclar" else answers.get(key, "")
+        lines.append(f"{label}: {value}")
+
+    body = "\n".join(lines)
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = f"🆕 Yeni Test Sonucu — {answers.get('ad_soyad', 'İsimsiz')}"
+    msg["From"] = sender
+    msg["To"] = admin_email
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, admin_email, msg.as_string())
+        return True
+    except Exception:
+        return False
+
+
+def save_lead(answers: dict) -> None:
+    """Yerel CSV'ye yedekler ve Gmail üzerinden anında bildirim e-postası gönderir."""
+    row = _row_from_answers(answers)
+    _save_local_backup(row)
+    _send_lead_email(answers)
 
 
 # ------------------------------------------------------------------
