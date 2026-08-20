@@ -11,7 +11,7 @@ from datetime import datetime
 # Sayfa Ayarları & Marka Renkleri (logodan alındı)
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="PRM Portföy | Yatırım Karakterinizi Keşfedin",
+    page_title="PiRM Portföy | Yatırım Karakterinizi Keşfedin",
     page_icon="📊",
     layout="centered",
 )
